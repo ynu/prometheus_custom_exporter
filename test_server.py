@@ -1,339 +1,364 @@
 import requests
 import json
 import time
+import os
+from dotenv import load_dotenv
 
-def test_root_endpoint():
-    """Test the root endpoint"""
-    try:
-        response = requests.get("http://localhost:8000/")
-        print("Root endpoint test:", "PASSED" if response.status_code == 200 else "FAILED")
-        print(f"Response: {response.json()}")
-    except Exception as e:
-        print(f"Root endpoint test FAILED: {e}")
+# Load environment variables
+load_dotenv()
+PORT = int(os.getenv("PORT", 8000))
+BASE_URL = f"http://localhost:{PORT}"
 
-def test_metrics_endpoint():
-    """Test the metrics endpoint"""
-    try:
-        response = requests.get("http://localhost:8000/metrics")
-        print("Metrics endpoint test:", "PASSED" if response.status_code == 200 else "FAILED")
-        print("Sample metrics:")
-        # Print first few lines of metrics
-        lines = response.text.split("\n")[:10]
-        for line in lines:
-            if line and not line.startswith("#"):
-                print(f"  {line}")
-    except Exception as e:
-        print(f"Metrics endpoint test FAILED: {e}")
+class TestResult:
+    """Class to store and display test results"""
+    def __init__(self, name, passed, message=None, details=None):
+        self.name = name
+        self.passed = passed
+        self.message = message
+        self.details = details
+    
+    def display(self):
+        """Display the test result"""
+        status = "PASSED" if self.passed else "FAILED"
+        print(f"{self.name}: {status}")
+        if self.message:
+            print(f"{self.message}")
+        if self.details:
+            print(f"{self.details}")
 
-def test_mcp_endpoints():
-    """Test the MCP endpoints with stateless HTTP and JSON response"""
-    try:
-        # Step 1: Test the add tool
-        print("\n=== Testing MCP Add Tool ===\n")
-        add_payload = {
+class ServerTester:
+    """Base class for server testing"""
+    def __init__(self, base_url=BASE_URL):
+        self.base_url = base_url
+        self.headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        }
+    
+    def make_get_request(self, endpoint):
+        """Make a GET request to the specified endpoint"""
+        try:
+            response = requests.get(f"{self.base_url}/{endpoint.lstrip('/')}")
+            return response
+        except Exception as e:
+            return None, str(e)
+    
+    def make_post_request(self, endpoint, payload):
+        """Make a POST request to the specified endpoint with the given payload"""
+        try:
+            response = requests.post(
+                f"{self.base_url}/{endpoint.lstrip('/')}",
+                headers=self.headers,
+                data=json.dumps(payload)
+            )
+            return response
+        except Exception as e:
+            return None, str(e)
+    
+    def extract_result_content(self, response_json):
+        """Extract the actual result content from various response formats"""
+        if not response_json or "result" not in response_json:
+            return None
+        
+        result = response_json["result"]
+        
+        # Handle different result formats
+        if isinstance(result, str):
+            return result
+        elif "content" in result and result["content"]:
+            return result["content"][0]["text"]
+        elif "contents" in result and result["contents"]:
+            return result["contents"][0]["text"]
+        elif "structuredContent" in result and "result" in result["structuredContent"]:
+            return result["structuredContent"]["result"]
+        else:
+            return str(result)
+
+class BasicEndpointTester(ServerTester):
+    """Test basic server endpoints"""
+    
+    def test_root_endpoint(self):
+        """Test the root endpoint"""
+        try:
+            response = self.make_get_request("")
+            if response and response.status_code == 200:
+                return TestResult(
+                    "Root endpoint test",
+                    True,
+                    f"Response: {response.json()}"
+                )
+            else:
+                return TestResult(
+                    "Root endpoint test",
+                    False,
+                    f"HTTP {response.status_code if response else 'No response'}"
+                )
+        except Exception as e:
+            return TestResult("Root endpoint test", False, f"Error: {e}")
+    
+    def test_metrics_endpoint(self):
+        """Test the metrics endpoint"""
+        try:
+            response = self.make_get_request("metrics")
+            if response and response.status_code == 200:
+                # Print first few non-comment lines of metrics
+                sample_metrics = "\n".join([
+                    f"  {line}" for line in response.text.split("\n")[:10]
+                    if line and not line.startswith("#")
+                ])
+                return TestResult(
+                    "Metrics endpoint test",
+                    True,
+                    "Sample metrics:",
+                    sample_metrics
+                )
+            else:
+                return TestResult(
+                    "Metrics endpoint test",
+                    False,
+                    f"HTTP {response.status_code if response else 'No response'}"
+                )
+        except Exception as e:
+            return TestResult("Metrics endpoint test", False, f"Error: {e}")
+
+class McpTester(ServerTester):
+    """Test MCP endpoints, tools, resources, and prompts"""
+    
+    def __init__(self, base_url=BASE_URL):
+        super().__init__(base_url)
+        self.mcp_endpoint = "mcp/"
+    
+    def test_tool(self, name, arguments, expected_result, test_id):
+        """Test an MCP tool"""
+        print(f"\n=== Testing MCP {name.capitalize()} Tool ===\n")
+        
+        payload = {
             "jsonrpc": "2.0",
             "method": "tools/call",
             "params": {
-                "name": "add",
-                "arguments": {
-                    "a": 5,
-                    "b": 7
-                }
+                "name": name,
+                "arguments": arguments
             },
-            "id": 1
+            "id": test_id
         }
-        add_response = requests.post(
-            "http://localhost:8000/mcp/",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            data=json.dumps(add_payload)
-        )
         
-        print(f"Add tool status code: {add_response.status_code}")
-        print(f"Add tool response: {add_response.text}")
+        response = self.make_post_request(self.mcp_endpoint, payload)
         
-        if add_response.status_code == 200:
-            add_result = add_response.json()
-            if "result" in add_result and add_result.get("id") == 1:
-                # Extract the actual result from the structured content
-                if "structuredContent" in add_result["result"] and "result" in add_result["result"]["structuredContent"]:
-                    actual_result = add_result["result"]["structuredContent"]["result"]
-                    print("MCP add tool test:", "PASSED" if actual_result == 12 else "FAILED")
-                    print(f"5 + 7 = {actual_result}")
+        print(f"{name.capitalize()} tool status code: {response.status_code}")
+        print(f"{name.capitalize()} tool response: {response.text}")
+        
+        if response.status_code == 200:
+            result_json = response.json()
+            if "result" in result_json and result_json.get("id") == test_id:
+                actual_result = self.extract_result_content(result_json)
+                
+                if actual_result == expected_result:
+                    return TestResult(
+                        f"MCP {name} tool test",
+                        True,
+                        f"{' '.join(str(arg) for arg in arguments.values())} = {actual_result}"
+                    )
                 else:
-                    print("MCP add tool test: FAILED - Unexpected result format")
-                    print(f"Response: {add_result}")
+                    return TestResult(
+                        f"MCP {name} tool test",
+                        False,
+                        f"Expected {expected_result}, got {actual_result}"
+                    )
             else:
-                print("MCP add tool test: FAILED - Invalid JSON-RPC response")
-                print(f"Response: {add_result}")
+                return TestResult(
+                    f"MCP {name} tool test",
+                    False,
+                    "Invalid JSON-RPC response",
+                    f"Response: {result_json}"
+                )
         else:
-            print(f"MCP add tool test FAILED: HTTP {add_response.status_code}")
+            return TestResult(
+                f"MCP {name} tool test",
+                False,
+                f"HTTP {response.status_code}"
+            )
+    
+    def test_resource(self, uri, expected_result, test_id, name=None):
+        """Test an MCP resource"""
+        resource_type = name if name else uri.split("://")[0]
+        print(f"\n=== Testing MCP {resource_type.capitalize()} Resource ===\n")
         
-        # Step 2: Test the multiply tool
-        print("\n=== Testing MCP Multiply Tool ===\n")
-        multiply_payload = {
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": "multiply",
-                "arguments": {
-                    "a": 6,
-                    "b": 7
-                }
-            },
-            "id": 2
-        }
-        multiply_response = requests.post(
-            "http://localhost:8000/mcp/",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            data=json.dumps(multiply_payload)
-        )
-        
-        print(f"Multiply tool status code: {multiply_response.status_code}")
-        print(f"Multiply tool response: {multiply_response.text}")
-        
-        if multiply_response.status_code == 200:
-            multiply_result = multiply_response.json()
-            if "result" in multiply_result and multiply_result.get("id") == 2:
-                # Extract the actual result from the structured content
-                if "structuredContent" in multiply_result["result"] and "result" in multiply_result["result"]["structuredContent"]:
-                    actual_result = multiply_result["result"]["structuredContent"]["result"]
-                    print("MCP multiply tool test:", "PASSED" if actual_result == 42 else "FAILED")
-                    print(f"6 * 7 = {actual_result}")
-                else:
-                    print("MCP multiply tool test: FAILED - Unexpected result format")
-                    print(f"Response: {multiply_result}")
-            else:
-                print("MCP multiply tool test: FAILED - Invalid JSON-RPC response")
-                print(f"Response: {multiply_result}")
-        else:
-            print(f"MCP multiply tool test FAILED: HTTP {multiply_response.status_code}")
-        
-        # Step 3: Test the greeting resource with parameter
-        print("\n=== Testing MCP Greeting Resource (Dynamic) ===\n")
-        name = "CodeBuddy"
-        # Use JSON-RPC 2.0 format for resource access
-        greeting_payload = {
+        payload = {
             "jsonrpc": "2.0",
             "method": "resources/read",
             "params": {
-                "uri": f"greeting://{name}"
+                "uri": uri
             },
-            "id": 3
+            "id": test_id
         }
-        greeting_response = requests.post(
-            "http://localhost:8000/mcp/",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            data=json.dumps(greeting_payload)
-        )
         
-        print(f"Greeting resource status code: {greeting_response.status_code}")
-        print(f"Greeting resource response: {greeting_response.text}")
+        response = self.make_post_request(self.mcp_endpoint, payload)
         
-        if greeting_response.status_code == 200:
-            greeting_result = greeting_response.json()
-            if "result" in greeting_result and greeting_result.get("id") == 3:
-                # Extract the actual result from the response
-                if "result" in greeting_result:
-                    # The result could be directly in the result field or in content/structuredContent
-                    if isinstance(greeting_result["result"], str):
-                        actual_result = greeting_result["result"]
-                    elif "content" in greeting_result["result"] and greeting_result["result"]["content"]:
-                        actual_result = greeting_result["result"]["content"][0]["text"]
-                    elif "structuredContent" in greeting_result["result"] and "result" in greeting_result["result"]["structuredContent"]:
-                        actual_result = greeting_result["result"]["structuredContent"]["result"]
-                    else:
-                        actual_result = str(greeting_result["result"])
+        print(f"{resource_type.capitalize()} resource status code: {response.status_code}")
+        print(f"{resource_type.capitalize()} resource response: {response.text}")
+        
+        if response.status_code == 200:
+            result_json = response.json()
+            if "result" in result_json and result_json.get("id") == test_id:
+                # For resources, the result is in the contents array
+                if "result" in result_json and "contents" in result_json["result"]:
+                    actual_result = result_json["result"]["contents"][0]["text"]
                     
-                    expected = f"Hello, {name}!"
-                    print("MCP greeting resource test:", "PASSED" if expected in actual_result else "FAILED")
-                    print(f"Greeting: {actual_result}")
-                else:
-                    print("MCP greeting resource test: FAILED - No result in response")
-                    print(f"Response: {greeting_result}")
-            else:
-                print("MCP greeting resource test: FAILED - Invalid JSON-RPC response")
-                print(f"Response: {greeting_result}")
-        else:
-            print(f"MCP greeting resource test FAILED: HTTP {greeting_response.status_code}")
-        
-        # Step 4: Test the static greeting resource
-        print("\n=== Testing MCP Greeting Resource (Static) ===\n")
-        # Use JSON-RPC 2.0 format for resource access
-        static_greeting_payload = {
-            "jsonrpc": "2.0",
-            "method": "resources/read",
-            "params": {
-                "uri": "greeting://hello"
-            },
-            "id": 4
-        }
-        static_greeting_response = requests.post(
-            "http://localhost:8000/mcp/",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            data=json.dumps(static_greeting_payload)
-        )
-        
-        print(f"Static greeting resource status code: {static_greeting_response.status_code}")
-        print(f"Static greeting resource response: {static_greeting_response.text}")
-        
-        if static_greeting_response.status_code == 200:
-            static_greeting_result = static_greeting_response.json()
-            if "result" in static_greeting_result and static_greeting_result.get("id") == 4:
-                # Extract the actual result from the response
-                if "result" in static_greeting_result:
-                    # The result could be directly in the result field or in content/structuredContent
-                    if isinstance(static_greeting_result["result"], str):
-                        actual_result = static_greeting_result["result"]
-                    elif "content" in static_greeting_result["result"] and static_greeting_result["result"]["content"]:
-                        actual_result = static_greeting_result["result"]["content"][0]["text"]
-                    elif "structuredContent" in static_greeting_result["result"] and "result" in static_greeting_result["result"]["structuredContent"]:
-                        actual_result = static_greeting_result["result"]["structuredContent"]["result"]
+                    if expected_result in actual_result:
+                        return TestResult(
+                            f"MCP {resource_type} resource test",
+                            True,
+                            f"{resource_type.capitalize()}: {actual_result}"
+                        )
                     else:
-                        actual_result = str(static_greeting_result["result"])
-                    
-                    expected = "Hello!"
-                    print("MCP static greeting resource test:", "PASSED" if expected in actual_result else "FAILED")
-                    print(f"Static Greeting: {actual_result}")
+                        return TestResult(
+                            f"MCP {resource_type} resource test",
+                            False,
+                            f"Expected '{expected_result}', got '{actual_result}'"
+                        )
                 else:
-                    print("MCP static greeting resource test: FAILED - No result in response")
-                    print(f"Response: {static_greeting_result}")
+                    return TestResult(
+                        f"MCP {resource_type} resource test",
+                        False,
+                        "No contents in response",
+                        f"Response: {result_json}"
+                    )
             else:
-                print("MCP static greeting resource test: FAILED - Invalid JSON-RPC response")
-                print(f"Response: {static_greeting_result}")
+                return TestResult(
+                    f"MCP {resource_type} resource test",
+                    False,
+                    "Invalid JSON-RPC response",
+                    f"Response: {result_json}"
+                )
         else:
-            print(f"MCP static greeting resource test FAILED: HTTP {static_greeting_response.status_code}")
+            return TestResult(
+                f"MCP {resource_type} resource test",
+                False,
+                f"HTTP {response.status_code}"
+            )
+    
+    def test_prompt(self, name, arguments, expected_result, test_id):
+        """Test an MCP prompt"""
+        print(f"\n=== Testing MCP {name.capitalize()} Prompt ===\n")
         
-        # Step 5: Test the farewell resource
-        print("\n=== Testing MCP Farewell Resource ===\n")
-        name = "CodeBuddy"
-        # Use JSON-RPC 2.0 format for resource access
-        farewell_payload = {
-            "jsonrpc": "2.0",
-            "method": "resources/read",
-            "params": {
-                "uri": f"farewell://{name}"
-            },
-            "id": 5
-        }
-        farewell_response = requests.post(
-            "http://localhost:8000/mcp/",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            data=json.dumps(farewell_payload)
-        )
-        
-        print(f"Farewell resource status code: {farewell_response.status_code}")
-        print(f"Farewell resource response: {farewell_response.text}")
-        
-        if farewell_response.status_code == 200:
-            farewell_result = farewell_response.json()
-            if "result" in farewell_result and farewell_result.get("id") == 5:
-                # Extract the actual result from the response
-                if "result" in farewell_result:
-                    # The result could be directly in the result field or in content/structuredContent
-                    if isinstance(farewell_result["result"], str):
-                        actual_result = farewell_result["result"]
-                    elif "content" in farewell_result["result"] and farewell_result["result"]["content"]:
-                        actual_result = farewell_result["result"]["content"][0]["text"]
-                    elif "structuredContent" in farewell_result["result"] and "result" in farewell_result["result"]["structuredContent"]:
-                        actual_result = farewell_result["result"]["structuredContent"]["result"]
-                    else:
-                        actual_result = str(farewell_result["result"])
-                    
-                    expected = f"Goodbye, {name}! Have a great day!"
-                    print("MCP farewell resource test:", "PASSED" if expected in actual_result else "FAILED")
-                    print(f"Farewell: {actual_result}")
-                else:
-                    print("MCP farewell resource test: FAILED - No result in response")
-                    print(f"Response: {farewell_result}")
-            else:
-                print("MCP farewell resource test: FAILED - Invalid JSON-RPC response")
-                print(f"Response: {farewell_result}")
-        else:
-            print(f"MCP farewell resource test FAILED: HTTP {farewell_response.status_code}")
-        
-        # Step 6: Test the weather prompt
-        print("\n=== Testing MCP Weather Prompt ===\n")
-        city = "Shanghai"
-        date = "today"
-        # Use JSON-RPC 2.0 format for prompt access
-        prompt_payload = {
+        payload = {
             "jsonrpc": "2.0",
             "method": "prompts/get",
             "params": {
-                "name": "weather_report",
-                "arguments": {
-                    "city": city,
-                    "date": date
-                }
+                "name": name,
+                "arguments": arguments
             },
-            "id": 6
+            "id": test_id
         }
-        prompt_response = requests.post(
-            "http://localhost:8000/mcp/",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
-            },
-            data=json.dumps(prompt_payload)
-        )
         
-        print(f"Weather prompt status code: {prompt_response.status_code}")
-        print(f"Weather prompt response: {prompt_response.text}")
+        response = self.make_post_request(self.mcp_endpoint, payload)
         
-        if prompt_response.status_code == 200:
-            prompt_result = prompt_response.json()
-            if "result" in prompt_result and prompt_result.get("id") == 6:
-                # Extract the actual result from the response
-                if "result" in prompt_result:
-                    # The result could be directly in the result field or in content/structuredContent
-                    if isinstance(prompt_result["result"], str):
-                        actual_result = prompt_result["result"]
-                    elif "content" in prompt_result["result"] and prompt_result["result"]["content"]:
-                        actual_result = prompt_result["result"]["content"][0]["text"]
-                    elif "structuredContent" in prompt_result["result"] and "result" in prompt_result["result"]["structuredContent"]:
-                        actual_result = prompt_result["result"]["structuredContent"]["result"]
-                    else:
-                        actual_result = str(prompt_result["result"])
-                    
-                    expected = f"请告诉我{city}在{date}的天气情况："
-                    print("MCP weather prompt test:", "PASSED" if expected in actual_result else "FAILED")
-                    print(f"Weather Prompt: {actual_result}")
+        print(f"{name.capitalize()} prompt status code: {response.status_code}")
+        print(f"{name.capitalize()} prompt response: {response.text}")
+        
+        if response.status_code == 200:
+            result_json = response.json()
+            if "result" in result_json and result_json.get("id") == test_id:
+                actual_result = self.extract_result_content(result_json)
+                
+                if expected_result in actual_result:
+                    return TestResult(
+                        f"MCP {name} prompt test",
+                        True,
+                        f"{name.capitalize()} Prompt: {actual_result}"
+                    )
                 else:
-                    print("MCP weather prompt test: FAILED - No result in response")
-                    print(f"Response: {prompt_result}")
+                    return TestResult(
+                        f"MCP {name} prompt test",
+                        False,
+                        f"Expected '{expected_result}', got '{actual_result}'"
+                    )
             else:
-                print("MCP weather prompt test: FAILED - Invalid JSON-RPC response")
-                print(f"Response: {prompt_result}")
+                return TestResult(
+                    f"MCP {name} prompt test",
+                    False,
+                    "Invalid JSON-RPC response",
+                    f"Response: {result_json}"
+                )
         else:
-            print(f"MCP weather prompt test FAILED: HTTP {prompt_response.status_code}")
-            
-    except Exception as e:
-        print(f"MCP endpoints test FAILED: {e}")
+            return TestResult(
+                f"MCP {name} prompt test",
+                False,
+                f"HTTP {response.status_code}"
+            )
 
-if __name__ == "__main__":
+def run_all_tests():
+    """Run all tests and display results"""
     print("Waiting for server to start...")
     time.sleep(2)  # Give the server time to start
     
+    # Test basic endpoints
     print("\n=== Testing Server Endpoints ===\n")
-    test_root_endpoint()
+    basic_tester = BasicEndpointTester()
+    root_result = basic_tester.test_root_endpoint()
+    root_result.display()
     
     print("\n=== Testing Prometheus Metrics ===\n")
-    test_metrics_endpoint()
+    metrics_result = basic_tester.test_metrics_endpoint()
+    metrics_result.display()
     
+    # Test MCP endpoints
     print("\n=== Testing MCP Endpoints ===\n")
-    test_mcp_endpoints()
+    mcp_tester = McpTester()
+    
+    # Test MCP tools
+    add_result = mcp_tester.test_tool(
+        "add", 
+        {"a": 5, "b": 7}, 
+        12, 
+        1
+    )
+    add_result.display()
+    
+    multiply_result = mcp_tester.test_tool(
+        "multiply", 
+        {"a": 6, "b": 7}, 
+        42, 
+        2
+    )
+    multiply_result.display()
+    
+    # Test MCP resources
+    name = "CodeBuddy"
+    greeting_result = mcp_tester.test_resource(
+        f"greeting://{name}",
+        f"Hello, {name}!",
+        3,
+        "Greeting (Dynamic)"
+    )
+    greeting_result.display()
+    
+    static_greeting_result = mcp_tester.test_resource(
+        "greeting://hello",
+        "Hello!",
+        4,
+        "Greeting (Static)"
+    )
+    static_greeting_result.display()
+    
+    farewell_result = mcp_tester.test_resource(
+        f"farewell://{name}",
+        f"Goodbye, {name}! Have a great day!",
+        5,
+        "Farewell"
+    )
+    farewell_result.display()
+    
+    # Test MCP prompts
+    city = "Shanghai"
+    date = "today"
+    weather_prompt_result = mcp_tester.test_prompt(
+        "weather_report",
+        {"city": city, "date": date},
+        f"请告诉我{city}在{date}的天气情况：",
+        6
+    )
+    weather_prompt_result.display()
+
+if __name__ == "__main__":
+    run_all_tests()
