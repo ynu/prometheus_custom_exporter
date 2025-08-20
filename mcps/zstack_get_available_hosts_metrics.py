@@ -1,6 +1,6 @@
 from . import mcp
 import json
-from metrics.zstack_metrics import (
+from metrics.zstack_get_available_hosts_metrics import (
     zstack_available_host_count,
     zstack_total_memory_capacity,
     zstack_total_cpu_capacity,
