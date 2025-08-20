@@ -367,7 +367,7 @@ def run_all_tests():
     metric_tool_result = mcp_tester.test_tool(
         "get_metric_value",
         {"label": "example"},
-        None,  # We can't predict the exact value as it's random
+        None,  # We can't predict the exact value
         7
     )
     # Override the display since we can't predict the exact value
@@ -393,6 +393,93 @@ def run_all_tests():
         9
     )
     metric_alert_result.display()
+    
+    # Test ZStack metrics via MCP
+    print("\n=== Testing ZStack Metrics via MCP ===\n")
+    
+    # Test ZStack metrics tool
+    print("Testing get_zstack_metrics tool...")
+    zstack_metrics_payload = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "get_zstack_metrics",
+            "arguments": {}
+        },
+        "id": 10
+    }
+    zstack_metrics_response = requests.post(
+        f"{BASE_URL}/mcp/",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        },
+        data=json.dumps(zstack_metrics_payload)
+    )
+    
+    if zstack_metrics_response.status_code == 200:
+        print("ZStack metrics tool test: PASSED")
+        # Just print a sample of the response to avoid overwhelming output
+        try:
+            result = zstack_metrics_response.json()
+            if "result" in result and "structuredContent" in result["result"] and "result" in result["result"]["structuredContent"]:
+                metrics = result["result"]["structuredContent"]["result"]
+                print(f"Sample metrics: availableHostCount={metrics.get('availableHostCount')}, totalVmCount={metrics.get('totalVmCount')}")
+            else:
+                print("Could not extract metrics from response")
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+    else:
+        print(f"ZStack metrics tool test FAILED: HTTP {zstack_metrics_response.status_code}")
+    
+    # Test ZStack resource
+    print("\nTesting zstack://metrics resource...")
+    zstack_resource_payload = {
+        "jsonrpc": "2.0",
+        "method": "resources/read",
+        "params": {
+            "uri": "zstack://metrics"
+        },
+        "id": 11
+    }
+    zstack_resource_response = requests.post(
+        f"{BASE_URL}/mcp/",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        },
+        data=json.dumps(zstack_resource_payload)
+    )
+    
+    if zstack_resource_response.status_code == 200:
+        print("ZStack resource test: PASSED")
+    else:
+        print(f"ZStack resource test FAILED: HTTP {zstack_resource_response.status_code}")
+    
+    # Test ZStack status report prompt
+    print("\nTesting zstack_status_report prompt...")
+    zstack_prompt_payload = {
+        "jsonrpc": "2.0",
+        "method": "prompts/get",
+        "params": {
+            "name": "zstack_status_report",
+            "arguments": {}
+        },
+        "id": 12
+    }
+    zstack_prompt_response = requests.post(
+        f"{BASE_URL}/mcp/",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
+        },
+        data=json.dumps(zstack_prompt_payload)
+    )
+    
+    if zstack_prompt_response.status_code == 200:
+        print("ZStack status report prompt test: PASSED")
+    else:
+        print(f"ZStack status report prompt test FAILED: HTTP {zstack_prompt_response.status_code}")
 
 if __name__ == "__main__":
     run_all_tests()
