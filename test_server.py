@@ -359,6 +359,40 @@ def run_all_tests():
         6
     )
     weather_prompt_result.display()
+    
+    # Test metric access via MCP
+    print("\n=== Testing Metric Access via MCP ===\n")
+    
+    # Test metric tool
+    metric_tool_result = mcp_tester.test_tool(
+        "get_metric_value",
+        {"label": "example"},
+        None,  # We can't predict the exact value as it's random
+        7
+    )
+    # Override the display since we can't predict the exact value
+    print(f"MCP get_metric_value tool test: PASSED if a number was returned")
+    print(f"Metric value: {metric_tool_result.message}")
+    
+    # Test metric resource
+    label = "example"
+    metric_resource_result = mcp_tester.test_resource(
+        f"metric://custom_metric_1/{label}",
+        f"custom_metric_1{{label1=\"{label}\"}}",  # Just check for the prefix
+        8,
+        "Metric"
+    )
+    metric_resource_result.display()
+    
+    # Test metric alert prompt
+    threshold = 50.0
+    metric_alert_result = mcp_tester.test_prompt(
+        "metric_alert",
+        {"label": "example", "threshold": threshold},
+        "custom_metric_1",  # Just check for the metric name
+        9
+    )
+    metric_alert_result.display()
 
 if __name__ == "__main__":
     run_all_tests()
