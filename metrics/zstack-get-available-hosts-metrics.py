@@ -7,6 +7,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Set a custom refresh interval for this metric (in seconds)
+# If not specified, it will use the global METRICS_REFRESH_INTERVAL from main.py
+REFRESH_INTERVAL = 86400 # Default to 1 day
+
 # API endpoint and key
 ZSTACK_API_URL, ZSTACK_API_KEY = os.getenv("ZSTACK_API_URL"), os.getenv("ZSTACK_API_KEY")
 if not ZSTACK_API_URL or not ZSTACK_API_KEY:

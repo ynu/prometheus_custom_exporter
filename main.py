@@ -87,24 +87,55 @@ def load_metric_modules():
                 try:
                     module = importlib.import_module(f'metrics.{module_name}')
                     loaded_metrics[module_name] = module
-                    print(f"Module {module_name} loaded, loaded_metrics: {loaded_metrics}")
+                    refresh_interval = getattr(module, 'REFRESH_INTERVAL', METRICS_REFRESH_INTERVAL)
+                    print(f"Module {module_name} loaded with refresh interval: {refresh_interval}s, loaded_metrics: {loaded_metrics}")
                     if hasattr(module, 'process'):
                         print(f"Processing {module_name}")
                         module.process()
+                    # Start individual processing thread for this new module
+                    start_individual_metric_processing(module_name, module)
                 except Exception as e:
                     print(f"Error loading {module_name}: {e}")
 
 def process_metrics():
-    """Process all loaded metrics"""
+    """
+    Process all loaded metrics once (used during initial loading)
+    Individual processing threads handle regular updates
+    """
     global loaded_metrics
     with lock:
         for metric_name, metric_module in loaded_metrics.items():
             try:
                 if hasattr(metric_module, 'process'):
-                    print(f"Processing {metric_name}")
+                    refresh_interval = getattr(metric_module, 'REFRESH_INTERVAL', METRICS_REFRESH_INTERVAL)
+                    print(f"Initial processing of {metric_name} (refresh: {refresh_interval}s)")
                     metric_module.process()
             except Exception as e:
                 print(f"Error processing {metric_name}: {e}")
+
+def start_individual_metric_processing(metric_name, metric_module):
+    """Start processing a specific metric in its own background thread with its own refresh interval"""
+    def individual_process_loop():
+        while True:
+            try:
+                # Get the module's refresh interval or use the global default
+                refresh_interval = getattr(metric_module, 'REFRESH_INTERVAL', METRICS_REFRESH_INTERVAL)
+                
+                if hasattr(metric_module, 'process'):
+                    print(f"Processing {metric_name} (refresh: {refresh_interval}s)")
+                    with lock:
+                        metric_module.process()
+                
+                # Sleep for this metric's specific refresh interval
+                time.sleep(refresh_interval)
+            except Exception as e:
+                print(f"Error processing {metric_name}: {e}")
+                time.sleep(METRICS_REFRESH_INTERVAL)  # Use default interval on error
+    
+    thread = threading.Thread(target=individual_process_loop)
+    thread.daemon = True
+    thread.start()
+    print(f"Started processing thread for {metric_name} with refresh interval: {getattr(metric_module, 'REFRESH_INTERVAL', METRICS_REFRESH_INTERVAL)}s")
 
 class MetricFileEventHandler(FileSystemEventHandler):
     """Custom event handler for file system events in metrics directory"""
@@ -162,14 +193,9 @@ def watch_directories():
 
 def start_metrics_processing():
     """Start processing metrics in a background thread"""
-    def process_loop():
-        while True:
-            process_metrics()
-            time.sleep(METRICS_REFRESH_INTERVAL)  # Process every METRICS_REFRESH_INTERVAL seconds
-    
-    thread = threading.Thread(target=process_loop)
-    thread.daemon = True
-    thread.start()
+    # Start individual metric processing threads with their own refresh intervals
+    for metric_name, metric_module in loaded_metrics.items():
+        start_individual_metric_processing(metric_name, metric_module)
 
 def start_directory_watching():
     """Start watching the metrics and mcps directories in a background thread"""
