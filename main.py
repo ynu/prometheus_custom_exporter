@@ -8,6 +8,11 @@ from fastapi import FastAPI
 from prometheus_client import make_asgi_app
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from dotenv import load_dotenv
+
+load_dotenv()
+
+METRICS_REFRESH_INTERVAL = int(os.environ.get('METRICS_REFRESH_INTERVAL', 10))
 
 # Import MCP server
 from mcps import mcp
@@ -160,7 +165,7 @@ def start_metrics_processing():
     def process_loop():
         while True:
             process_metrics()
-            time.sleep(10)  # Process every 10 seconds
+            time.sleep(METRICS_REFRESH_INTERVAL)  # Process every METRICS_REFRESH_INTERVAL seconds
     
     thread = threading.Thread(target=process_loop)
     thread.daemon = True
