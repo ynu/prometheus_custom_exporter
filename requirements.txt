@@ -1,2 +1,6 @@
 prometheus_client
 watchdog
+fastmcp
+fastapi
+python-dotenv
+uvicorn

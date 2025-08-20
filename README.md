@@ -1,99 +1,195 @@
-# Dynamic Prometheus Custom Exporter Server
+# Prometheus Custom Exporter with MCP Integration
 
 ## Introduction
 
-This project implements a **dynamic Prometheus custom exporter server** that automatically loads and processes Python modules to expose custom metrics. The server watches a specified directory (`metrics`) for any changes in Python files (such as creation or deletion) and dynamically loads or unloads them as needed. The metrics are exposed over HTTP in a format compatible with Prometheus, allowing it to scrape and monitor custom metrics.
+This project implements a dynamic Prometheus custom exporter server with Model Context Protocol (MCP) integration. The server automatically loads and processes Python modules to expose custom metrics and MCP tools/resources. It watches specified directories (`metrics` and `mcps`) for any changes in Python files and dynamically loads or unloads them as needed.
 
 ### Key Features:
-- **Dynamic Metric Loading**: Automatically loads Python modules from a specified directory (`metrics`) and exposes the metrics through a Prometheus-compatible HTTP server.
-- **Automatic Module Reloading**: Detects changes (e.g., file creation or deletion) in the `metrics` directory and dynamically loads or unloads modules.
-- **Prometheus Compatibility**: Exposes metrics via an HTTP server that Prometheus can scrape for monitoring.
-- **Multi-threading for Real-time Updates**: The server runs in the background, processing and updating metrics at regular intervals, while watching the `metrics` directory in real-time using multi-threading.
+
+- **Dynamic Metric Loading**: Automatically loads Python modules from the `metrics` directory and exposes them through a Prometheus-compatible HTTP server.
+- **Dynamic MCP Integration**: Automatically loads Python modules from the `mcps` directory and exposes MCP tools, resources, and prompts.
+- **Automatic Module Reloading**: Detects changes in both directories and dynamically loads or unloads modules.
+- **Unified API**: Both Prometheus metrics and MCP endpoints work on the same FastAPI server and port.
+- **Environment Configuration**: Uses dotenv for configuration management.
+- **Multi-threading for Real-time Updates**: The server runs in the background, processing and updating metrics at regular intervals.
 
 ## Installation
 
 Ensure you have Python installed and then install the required dependencies:
 
 ```bash
-pip install prometheus_client watchdog # OR pip install -r requirements.txt
+pip install -r requirements.txt
 ```
-
-Make sure to place your custom metric Python scripts in the `metrics` directory. Each script must define a `process()` function to collect the respective metrics.
 
 ## Project Structure
 
 Your project directory should look like this:
 
 ```
-your_project/
-├── main.py               # The main script to run the exporter
+prometheus_custom_exporter/
+├── main.py               # The main FastAPI server script
+├── .env                  # Environment configuration
 ├── metrics/              # Directory containing metric Python scripts
-│   ├── metric1.py
-│   ├── metric2.py
+│   ├── custom_metrics_1.py
+│   ├── custom_metrics_2.py
 │   └── ...
+├── mcps/                 # Directory containing MCP Python scripts
+│   ├── __init__.py       # Initializes the FastMCP instance
+│   ├── custom_mcp_1.py   # Custom MCP tools and resources
+│   ├── custom_mcp_2.py   # Additional MCP tools and resources
+│   └── ...
+├── test_server.py        # Test script for verifying functionality
 └── requirements.txt      # Dependency file
 ```
 
-Each Python file inside the `metrics` directory should implement a `process()` function, which is responsible for collecting and updating metrics.
+## Configuration
+
+The server configuration is managed through the `.env` file:
+
+```
+# Configuration for Prometheus Custom Exporter with MCP
+PORT=8000
+```
 
 ## Usage
 
-1. **Run the exporter**:
-   To start the dynamic Prometheus custom exporter server, run the following command:
+1. **Run the server**:
+   To start the Prometheus custom exporter server with MCP integration, run:
 
    ```bash
    python main.py
    ```
 
    This will:
-   - Load all Python modules in the `metrics` directory.
-   - Start a Prometheus-compatible HTTP server on port `8000`.
-   - Continuously watch the `metrics` directory for file changes (new or deleted Python scripts).
-   - Periodically process the loaded metrics every 10 seconds.
+   - Load all Python modules in the `metrics` and `mcps` directories
+   - Start a FastAPI server on the configured port (default: 8000)
+   - Mount Prometheus metrics at `/metrics`
+   - Mount MCP endpoints at `/mcp`
+   - Continuously watch both directories for file changes
+   - Periodically process the loaded metrics
 
-2. **Access Metrics**:
-   Once the server is running, Prometheus can scrape the metrics from:
+2. **Access Endpoints**:
+   - **Root**: `http://localhost:8000/`
+   - **Metrics**: `http://localhost:8000/metrics`
+   - **MCP**: `http://localhost:8000/mcp/`
 
-   ```
-   http://localhost:8000/metrics
-   ```
+3. **Testing the Server**:
+   Run the test script to verify all functionality:
 
-3. **Modifying the Metrics**:
-   - **Add new metrics**: Add new Python files to the `metrics` directory, and the server will automatically load them.
-   - **Remove metrics**: Delete Python files from the `metrics` directory, and the server will automatically unload them.
-   - **Modify existing metrics**: Modify a Python file in the `metrics` directory, and the server will dynamically reload it.
-
-4. **Understanding Metric Modules**:
-   Each metric module in the `metrics` directory must define a `process()` function that collects and updates the metric. Here’s an example of a simple metric module:
-
-   ```python
-   # metrics/example_metric.py
-
-   from prometheus_client import Gauge
-
-   # Define a Prometheus Gauge metric
-   example_metric = Gauge('example_metric', 'An example metric')
-
-   def process():
-       # Update the metric value
-       example_metric.set(42)
+   ```bash
+   python test_server.py
    ```
 
-5. **Multi-threading/Concurrency**:
-   - The server uses Python's threading capabilities to monitor the `metrics` directory for changes and process metrics concurrently.
-   - If you prefer multiprocessing for handling file monitoring, there is an option to switch to that in the script (currently commented out).
+## Implementing Custom Metrics
 
-## Code Overview
+Each metric module in the `metrics` directory must define a `process()` function that collects and updates metrics:
 
-- **Dynamic Loading of Metrics**: 
-  The script uses `importlib` to dynamically load Python files from the `metrics` directory. It checks for files with a `.py` extension and loads them as Python modules. The `process()` function defined in each module is called periodically to update the metrics.
+```python
+# metrics/custom_metrics_1.py
+from prometheus_client import Gauge
+import random
 
-- **Prometheus Exporter**: 
-  The script uses `prometheus_client` to expose metrics over HTTP. The HTTP server is set up on port `8000`, and Prometheus can scrape the metrics from this endpoint.
+# Define metrics
+custom_metric_1 = Gauge('custom_metric_1', 'Description of custom metric', ['label1'])
 
-- **File System Monitoring**: 
-  The script uses `watchdog` to monitor the `metrics` directory for file changes. When new files are created or deleted, the server dynamically updates the list of loaded modules, adding or removing them as necessary.
+def process():
+    """Update the custom metric with simulated data"""
+    data = {'value': random.randint(0, 100)}
+    custom_metric_1.labels(label1="example").set(data['value'])
+```
+
+## Implementing MCP Tools and Resources
+
+The MCP modules in the `mcps` directory can define tools, resources, and prompts:
+
+### Tools
+
+```python
+# mcps/custom_mcp_1.py
+from . import mcp
+
+@mcp.tool("add")
+def add_numbers(a: int, b: int) -> int:
+    """Add two numbers"""
+    return a + b
+```
+
+### Resources
+
+MCP resources can be static or dynamic:
+
+```python
+# Static resource
+@mcp.resource("greeting://hello")
+def get_greeting_hello() -> str:
+    """Simple greeting"""
+    return f"Hello!"
+
+# Dynamic resource with parameters
+@mcp.resource("greeting://{name}")
+def get_greeting(name: str) -> str:
+    """Get a personalized greeting message"""
+    return f"Hello, {name}!"
+```
+
+### Prompts
+
+```python
+@mcp.prompt("weather_report")
+def weather_prompt(city: str, date: str) -> str:
+    """Generate a weather query prompt template"""
+    return f"Please tell me the weather in {city} on {date}:"
+```
+
+## API Usage Examples
+
+### MCP Tool Calls
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "add",
+    "arguments": {
+      "a": 5,
+      "b": 7
+    }
+  },
+  "id": 1
+}
+```
+
+### MCP Resource Access
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "resources/read",
+  "params": {
+    "uri": "greeting://Alice"
+  },
+  "id": 2
+}
+```
+
+### MCP Prompt Access
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "prompts/get",
+  "params": {
+    "name": "weather_report",
+    "arguments": {
+      "city": "Shanghai",
+      "date": "today"
+    }
+  },
+  "id": 3
+}
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
